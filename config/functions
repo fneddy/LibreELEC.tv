@@ -1,9 +1,31 @@
 setup_toolchain() {
-  # lto flag
-  if flag_enabled "lto" "$LTO_SUPPORT" "only-disable"; then
-    TARGET_CFLAGS+=" $CFLAGS_OPTIM_LTO"
-    TARGET_CXXFLAGS+=" $CXXFLAGS_OPTIM_LTO"
-    TARGET_LDFLAGS+=" $LDFLAGS_OPTIM_LTO"
+  TARGET_AR_NM_RANLIB_PREFIX=""
+
+  if [ "$LTO_SUPPORT" = "yes" ]; then
+    if flag_enabled "lto-parallel" "no"; then
+      TARGET_CFLAGS+=" $FLAGS_OPTIM_LTO_PARALLEL $FLAGS_OPTIM_LTO_NO_FAT"
+      TARGET_CXXFLAGS+=" $FLAGS_OPTIM_LTO_PARALLEL $FLAGS_OPTIM_LTO_NO_FAT"
+      TARGET_LDFLAGS+=" $LDFLAGS_OPTIM_LTO_COMMON $FLAGS_OPTIM_LTO_PARALLEL"
+      # static libs with lto info require gcc-ar/gcc-nm/gcc-ranlib instead of
+      # default binutils versions
+      TARGET_AR_NM_RANLIB_PREFIX="gcc-"
+    elif flag_enabled "lto-fat" "no"; then
+      TARGET_CFLAGS+=" $FLAGS_OPTIM_LTO_NO_PARALLEL $FLAGS_OPTIM_LTO_FAT"
+      TARGET_CXXFLAGS+=" $FLAGS_OPTIM_LTO_NO_PARALLEL $FLAGS_OPTIM_LTO_FAT"
+      TARGET_LDFLAGS+=" $LDFLAGS_OPTIM_LTO_COMMON $FLAGS_OPTIM_LTO_NO_PARALLEL"
+      TARGET_AR_NM_RANLIB_PREFIX="gcc-"
+    elif flag_enabled "lto" "no"; then
+      TARGET_CFLAGS+=" $FLAGS_OPTIM_LTO_NO_PARALLEL $FLAGS_OPTIM_LTO_NO_FAT"
+      TARGET_CXXFLAGS+=" $FLAGS_OPTIM_LTO_NO_PARALLEL $FLAGS_OPTIM_LTO_NO_FAT"
+      TARGET_LDFLAGS+=" $LDFLAGS_OPTIM_LTO_COMMON $FLAGS_OPTIM_LTO_NO_PARALLEL"
+      TARGET_AR_NM_RANLIB_PREFIX="gcc-"
+    fi
+  fi
+
+  if flag_enabled "lto-off" "no"; then
+    TARGET_CFLAGS+=" $FLAGS_OPTIM_LTO_OFF"
+    TARGET_CXXFLAGS+=" $FLAGS_OPTIM_LTO_OFF"
+    TARGET_LDFLAGS+=" $FLAGS_OPTIM_LTO_OFF"
   fi
 
   # gold flag
@@ -47,9 +69,9 @@ setup_toolchain() {
       export CPP="${TARGET_PREFIX}cpp"
       export LD="${TARGET_PREFIX}ld"
       export AS="${TARGET_PREFIX}as"
-      export AR="${TARGET_PREFIX}ar"
-      export NM="${TARGET_PREFIX}nm"
-      export RANLIB="${TARGET_PREFIX}ranlib"
+      export AR="${TARGET_PREFIX}${TARGET_AR_NM_RANLIB_PREFIX}ar"
+      export NM="${TARGET_PREFIX}${TARGET_AR_NM_RANLIB_PREFIX}nm"
+      export RANLIB="${TARGET_PREFIX}${TARGET_AR_NM_RANLIB_PREFIX}ranlib"
       export OBJCOPY="${TARGET_PREFIX}objcopy"
       export OBJDUMP="${TARGET_PREFIX}objdump"
       export STRIP="${TARGET_PREFIX}strip"
@@ -164,6 +186,7 @@ cpp = '$CXX'
 ar = '$AR'
 strip = '$STRIP'
 pkgconfig = '$PKG_CONFIG'
+llvm-config = '$SYSROOT_PREFIX/usr/bin/llvm-config-host'
 
 [host_machine]
 system = 'linux'
@@ -239,6 +262,18 @@ kernel_config_path() {
     [[ $cfg =~ /devices//linux/ ]] && continue
     [ -f "$cfg" ] && echo "$cfg" && break
   done
+}
+
+kernel_make() {
+  LDFLAGS="" make CROSS_COMPILE=$TARGET_KERNEL_PREFIX \
+    ARCH="$TARGET_KERNEL_ARCH" \
+    HOSTCC="$TOOLCHAIN/bin/host-gcc" \
+    HOSTCXX="$TOOLCHAIN/bin/host-g++" \
+    HOSTCFLAGS="$HOST_CFLAGS" \
+    HOSTLDFLAGS="$HOST_LDFLAGS" \
+    HOSTCXXFLAGS="$HOST_CXXFLAGS" \
+    DEPMOD="$TOOLCHAIN/bin/depmod" \
+    "$@"
 }
 
 # get kernel module dir
@@ -889,7 +924,7 @@ debug_strip() {
     exit 1
   fi
 
-  if [ "${BUILD_WITH_DEBUG}" != "yes" ]; then
+  if [ "${BUILD_WITH_DEBUG}" != "yes" ] && flag_enabled "strip" "yes"; then
     find $* -type f -executable | xargs $STRIP 2>/dev/null || :
   fi
 }
